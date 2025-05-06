@@ -47,16 +47,34 @@ export const config = {
 const screenshotsDir = path.join(__dirname, 'screenshots');
 const debugDir = path.join(screenshotsDir, 'debug');
 const errorDir = path.join(screenshotsDir, 'errors');
+const logsDir = path.join(__dirname, 'logs');
 
-// Create screenshot directories if they don't exist
-if (!fs.existsSync(screenshotsDir)) {
-  fs.mkdirSync(screenshotsDir, { recursive: true });
+// Create necessary directories if they don't exist
+for (const dir of [screenshotsDir, debugDir, errorDir, logsDir]) {
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
 }
-if (!fs.existsSync(debugDir)) {
-  fs.mkdirSync(debugDir, { recursive: true });
-}
-if (!fs.existsSync(errorDir)) {
-  fs.mkdirSync(errorDir, { recursive: true });
+
+/**
+ * Log messages to both console and a log file
+ * @param {string} message - The message to log
+ * @param {boolean} error - Whether this is an error message
+ */
+function log(message, error = false) {
+  const timestamp = new Date().toISOString();
+  const logMessage = `[${timestamp}] ${message}`;
+  
+  // Log to console
+  if (error) {
+    console.error(logMessage);
+  } else {
+    console.log(logMessage);
+  }
+  
+  // Log to file
+  const logFile = path.join(logsDir, `scrapper_${new Date().toISOString().split('T')[0]}.log`);
+  fs.appendFileSync(logFile, logMessage + "\n");
 }
 
 // Enhanced logging utilities
@@ -75,19 +93,19 @@ function logError(error, options = {}) {
     showStack = true
   } = options;
   
-  console.error('\n❌ ERROR DETAILS ' + '='.repeat(50));
-  console.error(`🔍 Context: ${context}`);
-  console.error(`⚠️ Type: ${error.name || 'Unknown Error Type'}`);
-  console.error(`📝 Message: ${error.message}`);
+  log('\n❌ ERROR DETAILS ' + '='.repeat(50), true);
+  log(`🔍 Context: ${context}`, true);
+  log(`⚠️ Type: ${error.name || 'Unknown Error Type'}`, true);
+  log(`📝 Message: ${error.message}`, true);
   
   // If there's additional data, display it
   if (Object.keys(additionalData).length > 0) {
-    console.error('📋 Additional Information:');
+    log('📋 Additional Information:', true);
     Object.entries(additionalData).forEach(([key, value]) => {
       if (typeof value === 'object' && value !== null) {
-        console.error(`   ${key}: ${util.inspect(value, { depth: 1, colors: true })}`);
+        log(`   ${key}: ${util.inspect(value, { depth: 1, colors: true })}`, true);
       } else {
-        console.error(`   ${key}: ${value}`);
+        log(`   ${key}: ${value}`, true);
       }
     });
   }
@@ -97,26 +115,26 @@ function logError(error, options = {}) {
     const selectorMatch = error.message.match(/Waiting for selector `([^`]+)`/);
     if (selectorMatch) {
       const selector = selectorMatch[1];
-      console.error(`🔍 Failed Selector: ${selector}`);
-      console.error(`💡 Possible causes:`);
-      console.error(`   - Page structure may have changed (Google updated their HTML)`);
-      console.error(`   - Element may be inside an iframe or dynamically loaded`);
-      console.error(`   - The selector might not be present on this particular product page`);
-      console.error(`   - Page might be showing a CAPTCHA or anti-bot challenge`);
+      log(`🔍 Failed Selector: ${selector}`, true);
+      log(`💡 Possible causes:`, true);
+      log(`   - Page structure may have changed (Google updated their HTML)`, true);
+      log(`   - Element may be inside an iframe or dynamically loaded`, true);
+      log(`   - The selector might not be present on this particular product page`, true);
+      log(`   - Page might be showing a CAPTCHA or anti-bot challenge`, true);
     }
   }
   
   // Only show stack trace if requested
   if (showStack && error.stack) {
-    console.error('📚 Stack Trace:');
+    log('📚 Stack Trace:', true);
     const formattedStack = error.stack
       .split('\n')
       .map(line => '   ' + line.trim())
       .join('\n');
-    console.error(formattedStack);
+    log(formattedStack, true);
   }
   
-  console.error('='.repeat(65) + '\n');
+  log('='.repeat(65) + '\n', true);
 }
 
 // Enhance screenshot functionality to handle different error types
@@ -185,15 +203,16 @@ async function takeErrorScreenshot(page, errorType, details = '', additionalData
         fullPage: true 
       });
       
-      console.log(`📸 Error screenshot saved to: ${screenshotPath}`);
-      console.log(`🔍 Debug screenshot saved to: ${debugScreenshotPath}`);
+      log(`📸 Error screenshot saved to: ${screenshotPath}`);
+      log(`🔍 Debug screenshot saved to: ${debugScreenshotPath}`);
       return { regular: screenshotPath, debug: debugScreenshotPath };
     }
     
-    console.log(`📸 Error screenshot saved to: ${screenshotPath}`);
+    log(`📸 Error screenshot saved to: ${screenshotPath}`);
     return { regular: screenshotPath };
   } catch (screenshotError) {
-    console.error('⚠️ Failed to take error screenshot:', screenshotError.message);
+    log('⚠️ Failed to take error screenshot:', true);
+    log(screenshotError.message, true);
     return null;
   }
 }
@@ -288,12 +307,12 @@ async function scrapeProduct(url, options = {}) {
       ? options.clickDelay
       : config.DEFAULT_CLICK_DELAY;
 
-  console.log(`🔍 Scraping URL: ${url}`);
-  console.log(`📋 Options: ${JSON.stringify(options)}`);
-  console.log(
+  log(`🔍 Scraping URL: ${url}`);
+  log(`📋 Options: ${JSON.stringify(options)}`);
+  log(
     `🔄 Will attempt up to ${maxClicksStores} clicks for stores and ${maxClicksReviews} clicks for reviews`
   );
-  console.log(`⏱️ Click delay: ${clickDelay}ms`);
+  log(`⏱️ Click delay: ${clickDelay}ms`);
 
   // Connect to MongoDB
   await connectDB();
@@ -301,25 +320,25 @@ async function scrapeProduct(url, options = {}) {
   // Use the enhanced browser launcher with persistent profile
   let browser, page;
   try {
-    console.log('🔄 Launching browser with persistent profile...');
+    log('🔄 Launching browser with persistent profile...');
     // Use forceVisible: true to always show the browser during development
     // Set to false for production for better performance when no CAPTCHA is needed
     const browserData = await launchBrowserWithPersistence(url, { forceVisible: false });
     browser = browserData.browser;
     page = browserData.page;
-    console.log('✅ Browser launched successfully');
+    log('✅ Browser launched successfully');
   } catch (browserLaunchError) {
-    console.error(`❌ Failed to launch browser: ${browserLaunchError.message}`);
+    log(`❌ Failed to launch browser: ${browserLaunchError.message}`, true);
     throw browserLaunchError;
   }
 
-  console.log(`🌐 Beginning scraping process`);
+  log(`🌐 Beginning scraping process`);
 
   try {
     // If the URL is different after CAPTCHA (possible redirect), navigate again to ensure we're on product page
     const currentUrl = page.url();
     if (!currentUrl.includes('oshopproduct=') && url.includes('oshopproduct=')) {
-      console.log('⚠️ URL may have changed after CAPTCHA. Re-navigating to product page...');
+      log('⚠️ URL may have changed after CAPTCHA. Re-navigating to product page...');
       await page.goto(url, { waitUntil: "networkidle2", timeout: 45000 });
     }
 
@@ -400,21 +419,21 @@ async function scrapeProduct(url, options = {}) {
     });
 
     if (!isProductPage) {
-      console.log('⚠️ Page does not appear to be a Google Shopping product page. Taking screenshot...');
+      log('⚠️ Page does not appear to be a Google Shopping product page. Taking screenshot...');
       // Take diagnostic screenshot
       const timestamp = new Date().toISOString().replace(/:/g, '-');
       const screenshotPath = path.join(screenshotsDir, 'debug', `not_product_page_${timestamp}.png`);
       await page.screenshot({ path: screenshotPath, fullPage: true });
-      console.log(`📸 Screenshot saved to: ${screenshotPath}`);
+      log(`📸 Screenshot saved to: ${screenshotPath}`);
       
       // Save page HTML for debugging
       const pageContent = await page.content();
       fs.writeFileSync(path.join(screenshotsDir, 'debug', `page_content_${timestamp}.html`), pageContent);
       
       // Continue anyway since our detection might be wrong
-      console.log('⚠️ Continuing anyway since we might have a new Google Shopping UI format');
+      log('⚠️ Continuing anyway since we might have a new Google Shopping UI format');
     } else {
-      console.log('✅ Successfully detected Google Shopping product page');
+      log('✅ Successfully detected Google Shopping product page');
     }
 
     // Add random delay before navigation
@@ -427,10 +446,10 @@ async function scrapeProduct(url, options = {}) {
     });
 
     // Check for CAPTCHA immediately after navigation
-    console.log('🔍 Checking for CAPTCHA after initial navigation...');
+    log('🔍 Checking for CAPTCHA after initial navigation...');
     const initialCaptchaDetected = await checkAndHandleCaptcha(page);
     if (initialCaptchaDetected) {
-      console.log('✅ CAPTCHA handled successfully, continuing...');
+      log('✅ CAPTCHA handled successfully, continuing...');
       // Wait for the page to stabilize after CAPTCHA
       await waitFor(page, 3000);
     }
@@ -440,10 +459,10 @@ async function scrapeProduct(url, options = {}) {
 
     // Explicit wait for main container to load
     await page.waitForSelector(googleSelectors.mainContainer, { timeout: 15000 }).catch(async (error) => {
-      console.log('⚠️ Error waiting for main container, checking for CAPTCHA...');
+      log('⚠️ Error waiting for main container, checking for CAPTCHA...');
       const captchaDetected = await checkAndHandleCaptcha(page);
       if (captchaDetected) {
-        console.log('✅ CAPTCHA handled, retrying container detection...');
+        log('✅ CAPTCHA handled, retrying container detection...');
         await waitFor(page, 2000);
         // Try waiting for container again after handling CAPTCHA
         await page.waitForSelector(googleSelectors.mainContainer, { timeout: 15000 });
@@ -452,7 +471,7 @@ async function scrapeProduct(url, options = {}) {
       }
     });
 
-    console.log(`✅ Response received`);
+    log(`✅ Response received`);
 
     // Function to delay execution with randomization
     const delay = ms => new Promise(resolve => setTimeout(resolve, ms + getRandomDelay(-200, 400)));
@@ -472,7 +491,7 @@ async function scrapeProduct(url, options = {}) {
     await waitFor(page, getRandomDelay(1500, 3000));
 
     // Step 2: Check for review section and try to expand it
-    console.log(`🔍 Searching for review section...`);
+    log(`🔍 Searching for review section...`);
     const reviewSectionExists = await page.evaluate((selectors) => {
       // Try multiple selectors for review section
       for (const selector of selectors.reviewSection) {
@@ -502,7 +521,7 @@ async function scrapeProduct(url, options = {}) {
     });
 
     if (reviewSectionExists) {
-      console.log(`✅ Review section found`);
+      log(`✅ Review section found`);
       // Adding variable delay to mimic human reading behavior
       await delay(getRandomDelay(800, 2000));
 
@@ -513,14 +532,14 @@ async function scrapeProduct(url, options = {}) {
         delay: clickDelay,
       });
     } else {
-      console.log(`ℹ️ No review section found`);
+      log(`ℹ️ No review section found`);
     }
 
     // Check for CAPTCHA before final content extraction
-    console.log('🔍 Checking for CAPTCHA before content extraction...');
+    log('🔍 Checking for CAPTCHA before content extraction...');
     const finalCaptchaDetected = await checkAndHandleCaptcha(page);
     if (finalCaptchaDetected) {
-      console.log('✅ CAPTCHA handled before content extraction');
+      log('✅ CAPTCHA handled before content extraction');
       await waitFor(page, 2000); // Wait for page to stabilize
     }
 
@@ -531,40 +550,40 @@ async function scrapeProduct(url, options = {}) {
     // Pass the options to the Google Shopping scraper
     const result = google($, url, options);
 
-    console.log(
+    log(
       `\n📄 Parsed ${result.stores.length} stores and ${
         result.reviews ? result.reviews.length : 0
       } reviews`
     );
 
     // Display category and brand info
-    console.log(`📋 Product Details:`);
-    console.log(`   - Name: ${result.product_name || "Unknown"}`);
-    console.log(`   - Category: ${result.category || "Unknown"}`);
-    console.log(`   - Brand: ${result.brand || "Unknown"}`);
+    log(`📋 Product Details:`);
+    log(`   - Name: ${result.product_name || "Unknown"}`);
+    log(`   - Category: ${result.category || "Unknown"}`);
+    log(`   - Brand: ${result.brand || "Unknown"}`);
 
     // Save to MongoDB
-    console.log(`💾 Saving product data to MongoDB...`);
+    log(`💾 Saving product data to MongoDB...`);
     const savedProduct = await saveProduct(result);
 
     // Save session cookies for future use
-    console.log(`🍪 Saving session for future runs...`);
+    log(`🍪 Saving session for future runs...`);
     await saveSession(page);
 
-    console.log(
+    log(
       `\n✅ Product saved to database with ID: ${savedProduct.productId}`
     );
 
-    console.log(`📊 Product stats:`);
-    console.log(`   - Name: ${savedProduct.product_name}`);
-    console.log(
+    log(`📊 Product stats:`);
+    log(`   - Name: ${savedProduct.product_name}`);
+    log(
       `   - Price range: ${savedProduct.lowestPrice} - ${savedProduct.highestPrice} SAR`
     );
-    console.log(`   - Average price: ${savedProduct.averagePrice} SAR`);
-    console.log(
+    log(`   - Average price: ${savedProduct.averagePrice} SAR`);
+    log(
       `   - Price history entries: ${savedProduct.priceHistory.length}`
     );
-    console.log(
+    log(
       `   - Latest update: ${new Date(savedProduct.updatedAt).toLocaleString()}`
     );
 
@@ -627,7 +646,7 @@ async function expandSection(
 ) {
   let clickCount = 0;
 
-  console.log(
+  log(
     `🔍 Attempting to expand ${sectionName} section (up to ${maxClicks} times)...`
   );
 
@@ -645,10 +664,10 @@ async function expandSection(
   const waitForTimeout = (ms) => waitFor(page, ms);
   
   // Check for CAPTCHA before starting expansion
-  console.log('🔍 Checking for CAPTCHA before expanding section...');
+  log('🔍 Checking for CAPTCHA before expanding section...');
   const initialCaptchaDetected = await checkAndHandleCaptcha(page);
   if (initialCaptchaDetected) {
-    console.log('✅ CAPTCHA handled before section expansion');
+    log('✅ CAPTCHA handled before section expansion');
   }
 
   while (clickCount < maxClicks && attempts < maxAttempts) {
@@ -659,7 +678,7 @@ async function expandSection(
       await waitFor(page, 300);
 
       // First approach: Direct CSS selector
-      console.log(
+      log(
         `🔍 Attempt ${attempts}: Looking for ${sectionName} button with CSS selectors...`
       );
 
@@ -699,7 +718,7 @@ async function expandSection(
 
       // Second approach: Look for buttons with specific text
       if (!button) {
-        console.log(
+        log(
           `🔍 Attempt ${attempts}: Looking for ${sectionName} button by text content...`
         );
 
@@ -738,7 +757,7 @@ async function expandSection(
 
       // If no button was found with any method, try one more approach - XPath
       if (!button) {
-        console.log(
+        log(
           `🔍 Attempt ${attempts}: Trying XPath approach for ${sectionName} button...`
         );
 
@@ -757,7 +776,7 @@ async function expandSection(
 
       // If we still didn't find a button, break the loop
       if (!button || !buttonFound) {
-        console.log(
+        log(
           `ℹ️ No ${sectionName} "Show More" button found on attempt ${attempts}`
         );
 
@@ -766,11 +785,11 @@ async function expandSection(
           const storesCount = await page
             .$$eval(".R5K7Cb.SPI3ee", (stores) => stores.length)
             .catch(() => 0);
-          console.log(`📊 Currently showing ${storesCount} stores`);
+          log(`📊 Currently showing ${storesCount} stores`);
 
           // If we have a good number of stores already, consider it a success
           if (storesCount > 3) {
-            console.log(
+            log(
               `✅ Found ${storesCount} stores which seems sufficient, continuing...`
             );
             break;
@@ -779,11 +798,11 @@ async function expandSection(
           const reviewsCount = await page
             .$$eval(".wKtRYe.PZPZlf", (reviews) => reviews.length)
             .catch(() => 0);
-          console.log(`📊 Currently showing ${reviewsCount} reviews`);
+          log(`📊 Currently showing ${reviewsCount} reviews`);
 
           // If we have a good number of reviews already, consider it a success
           if (reviewsCount > 2) {
-            console.log(
+            log(
               `✅ Found ${reviewsCount} reviews which seems sufficient, continuing...`
             );
             break;
@@ -792,7 +811,7 @@ async function expandSection(
 
         // If we've tried multiple times without success, give up
         if (attempts >= 3) {
-          console.log(
+          log(
             `ℹ️ Giving up on finding ${sectionName} button after ${attempts} attempts`
           );
           break;
@@ -804,7 +823,7 @@ async function expandSection(
       }
 
       // Button found, try to click it
-      console.log(`✅ Found ${sectionName} button, scrolling to it...`);
+      log(`✅ Found ${sectionName} button, scrolling to it...`);
 
       // Scroll to make sure the button is in view
       await page
@@ -815,7 +834,7 @@ async function expandSection(
           el.style.border = "3px solid red";
           el.style.backgroundColor = "yellow";
         }, button)
-        .catch((e) => console.log(`⚠️ Error scrolling: ${e.message}`));
+        .catch((e) => log(`⚠️ Error scrolling: ${e.message}`, true));
 
       // Wait for scroll to complete
       await waitForTimeout(700);
@@ -825,23 +844,23 @@ async function expandSection(
 
       // Method 1: Native click
       try {
-        console.log(`🖱️ Clicking ${sectionName} button (method 1)...`);
+        log(`🖱️ Clicking ${sectionName} button (method 1)...`);
         await button.click({ delay: 100 });
         clickSucceeded = true;
       } catch (err) {
-        console.log(`⚠️ Method 1 click failed: ${err.message}`);
+        log(`⚠️ Method 1 click failed: ${err.message}`, true);
 
         // Method 2: JavaScript click
         try {
-          console.log(`🖱️ Clicking ${sectionName} button (method 2)...`);
+          log(`🖱️ Clicking ${sectionName} button (method 2)...`);
           await page.evaluate((el) => el.click(), button);
           clickSucceeded = true;
         } catch (err2) {
-          console.log(`⚠️ Method 2 click failed: ${err2.message}`);
+          log(`⚠️ Method 2 click failed: ${err2.message}`, true);
 
           // Method 3: Mouse events
           try {
-            console.log(`🖱️ Clicking ${sectionName} button (method 3)...`);
+            log(`🖱️ Clicking ${sectionName} button (method 3)...`);
             const box = await button.boundingBox();
             if (box) {
               await page.mouse.move(
@@ -854,14 +873,14 @@ async function expandSection(
               clickSucceeded = true;
             }
           } catch (err3) {
-            console.log(`⚠️ Method 3 click failed: ${err3.message}`);
+            log(`⚠️ Method 3 click failed: ${err3.message}`, true);
           }
         }
       }
 
       if (clickSucceeded) {
         clickCount++;
-        console.log(
+        log(
           `✅ Click ${clickCount}/${maxClicks} on "${sectionName}" button successful`
         );
 
@@ -873,19 +892,19 @@ async function expandSection(
           const storesCount = await page
             .$$eval(".R5K7Cb.SPI3ee", (stores) => stores.length)
             .catch(() => 0);
-          console.log(
+          log(
             `📊 Found ${storesCount} stores after click ${clickCount}`
           );
         } else if (sectionName === "reviews") {
           const reviewsCount = await page
             .$$eval(".wKtRYe.PZPZlf", (reviews) => reviews.length)
             .catch(() => 0);
-          console.log(
+          log(
             `📊 Found ${reviewsCount} reviews after click ${clickCount}`
           );
         }
       } else {
-        console.log(`⚠️ All click methods failed for ${sectionName} button`);
+        log(`⚠️ All click methods failed for ${sectionName} button`, true);
 
         // If we can't click after multiple attempts, break the loop
         if (attempts >= maxAttempts - 1) {
@@ -900,19 +919,19 @@ async function expandSection(
         .catch(() => false);
 
       if (!buttonStillExists) {
-        console.log(
+        log(
           `ℹ️ No more "${sectionName}" buttons available after ${clickCount} clicks`
         );
         break;
       }
     } catch (error) {
-      console.log(
-        `⚠️ Error during ${sectionName} expansion attempt ${attempts}: ${error.message}`
+      log(
+        `⚠️ Error during ${sectionName} expansion attempt ${attempts}: ${error.message}`, true
       );
 
       // If we've had too many errors, give up
       if (attempts >= maxAttempts - 1) {
-        console.log(
+        log(
           `ℹ️ Giving up on ${sectionName} expansion after too many errors`
         );
         break;
@@ -920,7 +939,7 @@ async function expandSection(
     }
   }
 
-  console.log(`✅ Expanded ${sectionName} section with ${clickCount} clicks`);
+  log(`✅ Expanded ${sectionName} section with ${clickCount} clicks`);
   return clickCount;
 }
 
@@ -936,8 +955,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const reviewsClicks = process.argv[6] ? parseInt(process.argv[6], 10) : config.MAX_CLICK_ATTEMPTS_REVIEWS;
 
   if (!url) {
-    console.error("❌ Error: URL is required");
-    console.log("Usage: node scrapper.js <url> [category] [brand] [storesClicks] [reviewsClicks]");
+    log("❌ Error: URL is required", true);
+    log("Usage: node scrapper.js <url> [category] [brand] [storesClicks] [reviewsClicks]");
     process.exit(1);
   }
 
@@ -949,18 +968,18 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     maxClicksReviews: reviewsClicks
   })
     .then(() => {
-      console.log("✅ Scraping completed successfully");
+      log("✅ Scraping completed successfully");
       // Exit after direct execution
       setTimeout(() => process.exit(0), 2000);
     })
     .catch((error) => {
       // Avoid duplicating the error message since we've already logged it with our enhanced logger
-      console.error("❌ Scraping failed");
+      log("❌ Scraping failed", true);
       process.exit(1);
     });
 } else {
   // Export the function for use in other files
-  console.log("📦 Exporting scrapeProduct function");
+  log("📦 Exporting scrapeProduct function");
 }
 
 export default scrapeProduct;

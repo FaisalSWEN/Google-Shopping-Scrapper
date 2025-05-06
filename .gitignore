@@ -3,8 +3,8 @@ node_modules/
 screenshots/
 data/
 browser-data/
+logs/
 
 # Files
 *.env
-*.log
 .DS_Store

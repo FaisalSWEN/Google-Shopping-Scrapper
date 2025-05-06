@@ -17,7 +17,7 @@ import connectDB from "./config/database.js";
 import { saveProduct } from "./services/productService.js";
 import { googleSelectors } from "./config/selectors.js";
 import { checkAndHandleCaptcha } from "./utils/captchaHandler.js";
-import { launchBrowserWithCaptchaHandling } from "./utils/browserLauncher.js";
+import { launchBrowserWithPersistence, saveSession } from "./utils/enhancedBrowserLauncher.js";
 
 // Initialize stealth plugin
 puppeteer.use(StealthPlugin());
@@ -298,11 +298,13 @@ async function scrapeProduct(url, options = {}) {
   // Connect to MongoDB
   await connectDB();
 
-  // Use the new browser launcher that handles CAPTCHAs
+  // Use the enhanced browser launcher with persistent profile
   let browser, page;
   try {
-    console.log('🔄 Launching browser with CAPTCHA handling...');
-    const browserData = await launchBrowserWithCaptchaHandling(url);
+    console.log('🔄 Launching browser with persistent profile...');
+    // Use forceVisible: true to always show the browser during development
+    // Set to false for production for better performance when no CAPTCHA is needed
+    const browserData = await launchBrowserWithPersistence(url, { forceVisible: false });
     browser = browserData.browser;
     page = browserData.page;
     console.log('✅ Browser launched successfully');
@@ -545,9 +547,14 @@ async function scrapeProduct(url, options = {}) {
     console.log(`💾 Saving product data to MongoDB...`);
     const savedProduct = await saveProduct(result);
 
+    // Save session cookies for future use
+    console.log(`🍪 Saving session for future runs...`);
+    await saveSession(page);
+
     console.log(
       `\n✅ Product saved to database with ID: ${savedProduct.productId}`
     );
+
     console.log(`📊 Product stats:`);
     console.log(`   - Name: ${savedProduct.product_name}`);
     console.log(

@@ -1,5 +1,10 @@
+# Directories
 node_modules/
 screenshots/
+data/
+browser-data/
+
+# Files
 *.env
 *.log
 .DS_Store

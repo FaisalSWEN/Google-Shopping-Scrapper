@@ -273,7 +273,28 @@ function detectCategoryFromName(productName) {
   
   const productNameLower = productName.toLowerCase();
   
-  // Category detection patterns
+  // Check for specific high-priority identifiers first
+  // Laptops - check first to ensure MacBooks are properly identified
+  if (/macbook|ماك بوك|ماكبوك/.test(productNameLower) ||
+      /laptop|لابتوب|نوت بوك/.test(productNameLower) ||
+      /notebook|نوتبوك/.test(productNameLower) ||
+      /chromebook|كروم بوك/.test(productNameLower) ||
+      /thinkpad|ثينك باد/.test(productNameLower) ||
+      /surface book|سيرفس/.test(productNameLower) ||
+      /dell xps|ديل/.test(productNameLower) ||
+      /hp spectre|إتش بي/.test(productNameLower)) {
+    return "laptops";
+  }
+  
+  // iPads/Tablets - check these next
+  if (/ipad|آيباد|أيباد|ايباد/.test(productNameLower) ||
+      /tablet|تابلت|لوحي/.test(productNameLower) ||
+      /galaxy tab|جالاكسي تاب/.test(productNameLower) ||
+      /mi pad|شاومي باد/.test(productNameLower)) {
+    return "tablets";
+  }
+  
+  // Full category detection patterns
   const categoryPatterns = [
     // Smartphones
     {
@@ -291,31 +312,6 @@ function detectCategoryFromName(productName) {
         /128gb|256gb|512gb|128 جيجا|256 جيجا/, // Common phone storage sizes
         /pro\s*max|برو\s*ماكس/, // Pro Max suffix common in phones
         /faceTime/i, // FaceTime (for iPhones)
-      ]
-    },
-    // Tablets
-    {
-      category: "tablets",
-      patterns: [
-        /ipad|آيباد|أيباد|ايباد/, // iPad variations
-        /tablet|تابلت|لوحي/, // Generic tablet terms
-        /galaxy tab|جالاكسي تاب/, // Samsung tablets
-        /mi pad|شاومي باد/, // Xiaomi tablets
-        /\d+\s*inch|شاشة\s*\d+\s*بوصة/, // Screen sizes (common in tablet listings)
-      ]
-    },
-    // Laptops
-    {
-      category: "laptops",
-      patterns: [
-        /macbook|ماك بوك|ماكبوك/, // MacBook variations
-        /laptop|لابتوب|نوت بوك/, // Generic laptop terms
-        /thinkpad|ثينك باد/, // Lenovo ThinkPad
-        /notebook|نوتبوك/, // Notebook terminology
-        /chromebook|كروم بوك/, // Chromebooks
-        /surface book|سيرفس/, // Microsoft Surface
-        /dell xps|ديل/, // Dell XPS
-        /hp spectre|إتش بي/, // HP Spectre
       ]
     },
     // Audio products

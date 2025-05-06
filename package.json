@@ -26,7 +26,6 @@
     "mongoose": "^8.14.1",
     "puppeteer": "^24.7.2",
     "puppeteer-extra": "^3.3.6",
-    "puppeteer-extra-plugin-stealth": "^2.11.2",
-    "random-useragent": "^0.5.0"
+    "puppeteer-extra-plugin-stealth": "^2.11.2"
   }
 }

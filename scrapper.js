@@ -6,17 +6,18 @@
 
 import path from "path";
 import fs from 'fs';
+import util from 'util';
 import { fileURLToPath } from "url";
 import puppeteer from "puppeteer-extra";
 import StealthPlugin from "puppeteer-extra-plugin-stealth";
 import * as cheerio from "cheerio";
 import dotenv from "dotenv";
-import randomUseragent from "random-useragent";
 import google from "./stores/google.js";
 import connectDB from "./config/database.js";
 import { saveProduct } from "./services/productService.js";
 import { googleSelectors } from "./config/selectors.js";
-import util from 'util';
+import { checkAndHandleCaptcha } from "./utils/captchaHandler.js";
+import { launchBrowserWithCaptchaHandling } from "./utils/browserLauncher.js";
 
 // Initialize stealth plugin
 puppeteer.use(StealthPlugin());
@@ -42,10 +43,20 @@ export const config = {
 };
 
 // Add screenshot functionality for error handling
-// Create screenshots directory if it doesn't exist
+// Create organized directory structure for screenshots
 const screenshotsDir = path.join(__dirname, 'screenshots');
+const debugDir = path.join(screenshotsDir, 'debug');
+const errorDir = path.join(screenshotsDir, 'errors');
+
+// Create screenshot directories if they don't exist
 if (!fs.existsSync(screenshotsDir)) {
   fs.mkdirSync(screenshotsDir, { recursive: true });
+}
+if (!fs.existsSync(debugDir)) {
+  fs.mkdirSync(debugDir, { recursive: true });
+}
+if (!fs.existsSync(errorDir)) {
+  fs.mkdirSync(errorDir, { recursive: true });
 }
 
 // Enhanced logging utilities
@@ -224,12 +235,12 @@ async function humanLikeScroll(page) {
   const scrollHeight = await page.evaluate('document.body.scrollHeight');
   const viewportHeight = await page.evaluate('window.innerHeight');
   
-  // Number of scroll steps (variable based on page height)
-  const scrollSteps = Math.floor(scrollHeight / viewportHeight) + 1;
+  // Number of scroll steps (fixed to be more consistent)
+  const scrollSteps = Math.min(5, Math.floor(scrollHeight / viewportHeight));
   
   for (let i = 0; i < scrollSteps; i++) {
-    // Calculate random scroll amount with occasional "jitter"
-    const scrollAmount = Math.floor(viewportHeight * (0.7 + Math.random() * 0.3));
+    // Calculate a more consistent scroll amount
+    const scrollAmount = Math.floor(viewportHeight * 0.8);
     
     await page.evaluate((amount) => {
       window.scrollBy({
@@ -238,20 +249,8 @@ async function humanLikeScroll(page) {
       });
     }, scrollAmount);
     
-    // Random pause between scrolls
-    await waitFor(page, getRandomDelay(500, 1500));
-    
-    // Occasionally scroll back up slightly (like a human reading content)
-    if (Math.random() < 0.3) {
-      const backScrollAmount = Math.floor(Math.random() * 300);
-      await page.evaluate((amount) => {
-        window.scrollBy({
-          top: -amount,
-          behavior: 'smooth'
-        });
-      }, backScrollAmount);
-      await waitFor(page, getRandomDelay(400, 800));
-    }
+    // Consistent pause between scrolls
+    await waitFor(page, 1200);
   }
 }
 
@@ -299,105 +298,123 @@ async function scrapeProduct(url, options = {}) {
   // Connect to MongoDB
   await connectDB();
 
-  // Browser launch options with enhanced stealth
-  const browser = await puppeteer.launch({ 
-    headless: true,
-    args: [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-infobars',
-      '--window-position=0,0',
-      '--ignore-certifcate-errors',
-      '--ignore-certifcate-errors-spki-list',
-      `--user-agent=${randomUseragent.getRandom()}`,
-      '--disable-web-security'
-    ]
-  });
-  
-  const page = await browser.newPage();
-  
-  // Randomize viewport size
-  const width = Math.floor(Math.random() * (1920 - 1024 + 1)) + 1024;
-  const height = Math.floor(Math.random() * (1080 - 768 + 1)) + 768;
-  await page.setViewport({ width, height, deviceScaleFactor: 1 });
+  // Use the new browser launcher that handles CAPTCHAs
+  let browser, page;
+  try {
+    console.log('🔄 Launching browser with CAPTCHA handling...');
+    const browserData = await launchBrowserWithCaptchaHandling(url);
+    browser = browserData.browser;
+    page = browserData.page;
+    console.log('✅ Browser launched successfully');
+  } catch (browserLaunchError) {
+    console.error(`❌ Failed to launch browser: ${browserLaunchError.message}`);
+    throw browserLaunchError;
+  }
 
-  // Randomize request headers
-  await page.setExtraHTTPHeaders({
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
-    'Accept-Language': 'en-US,en;q=0.9,ar;q=0.8',
-    'Cache-Control': 'max-age=0',
-    'Connection': 'keep-alive',
-    'Referer': 'https://www.google.com/',
-    'Sec-Ch-Ua': '"Not.A/Brand";v="8", "Chromium";v="114", "Google Chrome";v="114"',
-    'Sec-Ch-Ua-Mobile': '?0',
-    'Sec-Ch-Ua-Platform': '"Windows"',
-    'Sec-Fetch-Dest': 'document',
-    'Sec-Fetch-Mode': 'navigate',
-    'Sec-Fetch-Site': 'same-origin',
-    'Upgrade-Insecure-Requests': '1',
-  });
-
-  // Modify browser fingerprint to appear more human-like
-  await page.evaluateOnNewDocument(() => {
-    // Override the 'webdriver' property
-    Object.defineProperty(navigator, 'webdriver', {
-      get: () => false,
-    });
-    
-    // Override Chrome's automation property
-    window.chrome = {
-      runtime: {},
-      loadTimes: function() {},
-      csi: function() {},
-      app: {},
-    };
-    
-    // Override permissions API
-    const originalQuery = window.navigator.permissions.query;
-    window.navigator.permissions.query = (parameters) => (
-      parameters.name === 'notifications' ?
-        Promise.resolve({ state: Notification.permission }) :
-        originalQuery(parameters)
-    );
-    
-    // Add plugins
-    Object.defineProperty(navigator, 'plugins', {
-      get: () => {
-        const plugins = [
-          {
-            0: {
-              type: 'application/x-google-chrome-pdf',
-              suffixes: 'pdf',
-              description: 'Portable Document Format'
-            },
-            name: 'Chrome PDF Plugin',
-            filename: 'internal-pdf-viewer',
-            description: 'Portable Document Format'
-          },
-          {
-            0: {
-              type: 'application/pdf',
-              suffixes: 'pdf',
-              description: 'Portable Document Format'
-            },
-            name: 'Chrome PDF Viewer',
-            filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai',
-            description: 'Portable Document Format'
-          }
-        ];
-        return plugins;
-      }
-    });
-    
-    // Add language preferences
-    Object.defineProperty(navigator, 'languages', {
-      get: () => ['en-US', 'en', 'ar'],
-    });
-  });
-
-  console.log(`🌐 Sending request to Google Shopping`);
+  console.log(`🌐 Beginning scraping process`);
 
   try {
+    // If the URL is different after CAPTCHA (possible redirect), navigate again to ensure we're on product page
+    const currentUrl = page.url();
+    if (!currentUrl.includes('oshopproduct=') && url.includes('oshopproduct=')) {
+      console.log('⚠️ URL may have changed after CAPTCHA. Re-navigating to product page...');
+      await page.goto(url, { waitUntil: "networkidle2", timeout: 45000 });
+    }
+
+    // Add a check for Google Shopping product page to confirm we're on the right page
+    const isProductPage = await page.evaluate(() => {
+      // Comprehensive check for Google Shopping product page elements using multiple selectors
+      // Main content containers
+      const mainContainers = [
+        '.fzeRu.zGbHN',  // Product container
+        '.BvQan',        // Product details
+        '.sh-osd__offer-container', // Offer container
+        '.R5K7Cb.SPI3ee', // Store container
+        '.PZPZlf',       // Reviews
+        '.XkAcee.g7Jdnb' // Product information
+      ];
+      
+      // Header elements that indicate a product page
+      const headerElements = [
+        'h1.BXIkFb', // Product title in header
+        '.Pgbknd',   // Price
+        '.mDMo4e',   // Overall product header
+        '.gw0gH'     // Google Shopping header
+      ];
+      
+      // Product specific elements
+      const productElements = [
+        '.fALoRc',   // Product image gallery
+        '.DYd0Le',   // Rating stars 
+        '.E5ocAb',   // Shipping information
+        '.KfAt4d',   // Product images
+        '.wKtRYe'    // Reviews container
+      ];
+      
+      // Check main containers
+      for (const selector of mainContainers) {
+        if (document.querySelector(selector)) {
+          return true;
+        }
+      }
+      
+      // Check header elements
+      for (const selector of headerElements) {
+        if (document.querySelector(selector)) {
+          return true;
+        }
+      }
+      
+      // Check product specific elements
+      for (const selector of productElements) {
+        if (document.querySelector(selector)) {
+          return true;
+        }
+      }
+      
+      // Check if search results contain shopping entries
+      if (document.querySelector('[data-docid*="product_"]')) {
+        return true;
+      }
+      
+      // Check if URL indicates a product page
+      const url = window.location.href;
+      if (url.includes('oshopproduct=') || 
+          url.includes('/shopping/') || 
+          url.includes('&tbm=shop')) {
+        // URL patterns suggest this is a shopping page
+        return true;
+      }
+      
+      // Check if we can find any text suggesting this is a shopping page
+      const pageText = document.body.innerText;
+      if ((pageText.includes('متاجر') || pageText.includes('stores')) && 
+          (pageText.includes('التقييمات') || pageText.includes('reviews') || pageText.includes('مراجعات'))) {
+        return true;
+      }
+      
+      // Nothing detected
+      return false;
+    });
+
+    if (!isProductPage) {
+      console.log('⚠️ Page does not appear to be a Google Shopping product page. Taking screenshot...');
+      // Take diagnostic screenshot
+      const timestamp = new Date().toISOString().replace(/:/g, '-');
+      const screenshotPath = path.join(screenshotsDir, 'debug', `not_product_page_${timestamp}.png`);
+      await page.screenshot({ path: screenshotPath, fullPage: true });
+      console.log(`📸 Screenshot saved to: ${screenshotPath}`);
+      
+      // Save page HTML for debugging
+      const pageContent = await page.content();
+      fs.writeFileSync(path.join(screenshotsDir, 'debug', `page_content_${timestamp}.html`), pageContent);
+      
+      // Continue anyway since our detection might be wrong
+      console.log('⚠️ Continuing anyway since we might have a new Google Shopping UI format');
+    } else {
+      console.log('✅ Successfully detected Google Shopping product page');
+    }
+
     // Add random delay before navigation
     await waitFor(page, getRandomDelay(1000, 3000));
     
@@ -407,11 +424,31 @@ async function scrapeProduct(url, options = {}) {
       timeout: 30000 
     });
 
+    // Check for CAPTCHA immediately after navigation
+    console.log('🔍 Checking for CAPTCHA after initial navigation...');
+    const initialCaptchaDetected = await checkAndHandleCaptcha(page);
+    if (initialCaptchaDetected) {
+      console.log('✅ CAPTCHA handled successfully, continuing...');
+      // Wait for the page to stabilize after CAPTCHA
+      await waitFor(page, 3000);
+    }
+
     // Wait randomly to appear more human-like
     await waitFor(page, getRandomDelay(2000, 4000));
 
     // Explicit wait for main container to load
-    await page.waitForSelector(googleSelectors.mainContainer, { timeout: 15000 });
+    await page.waitForSelector(googleSelectors.mainContainer, { timeout: 15000 }).catch(async (error) => {
+      console.log('⚠️ Error waiting for main container, checking for CAPTCHA...');
+      const captchaDetected = await checkAndHandleCaptcha(page);
+      if (captchaDetected) {
+        console.log('✅ CAPTCHA handled, retrying container detection...');
+        await waitFor(page, 2000);
+        // Try waiting for container again after handling CAPTCHA
+        await page.waitForSelector(googleSelectors.mainContainer, { timeout: 15000 });
+      } else {
+        throw error; // If no CAPTCHA detected, rethrow the original error
+      }
+    });
 
     console.log(`✅ Response received`);
 
@@ -475,6 +512,14 @@ async function scrapeProduct(url, options = {}) {
       });
     } else {
       console.log(`ℹ️ No review section found`);
+    }
+
+    // Check for CAPTCHA before final content extraction
+    console.log('🔍 Checking for CAPTCHA before content extraction...');
+    const finalCaptchaDetected = await checkAndHandleCaptcha(page);
+    if (finalCaptchaDetected) {
+      console.log('✅ CAPTCHA handled before content extraction');
+      await waitFor(page, 2000); // Wait for page to stabilize
     }
 
     // Get the content after all expansions
@@ -591,6 +636,13 @@ async function expandSection(
 
   // Function for delaying execution (replacement for page.waitForTimeout)
   const waitForTimeout = (ms) => waitFor(page, ms);
+  
+  // Check for CAPTCHA before starting expansion
+  console.log('🔍 Checking for CAPTCHA before expanding section...');
+  const initialCaptchaDetected = await checkAndHandleCaptcha(page);
+  if (initialCaptchaDetected) {
+    console.log('✅ CAPTCHA handled before section expansion');
+  }
 
   while (clickCount < maxClicks && attempts < maxAttempts) {
     attempts++;

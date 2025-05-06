@@ -73,7 +73,7 @@ export const googleSelectors = {
   },
   
   // Main product container
-  mainContainer: ".bWXikd",
+  mainContainer: ".bWXikd, .zxYWDc",
   
   // Review section detection selectors
   reviewSection: [

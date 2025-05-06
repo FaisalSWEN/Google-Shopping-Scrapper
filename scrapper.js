@@ -4,7 +4,8 @@
  * Uses Puppeteer to navigate to Google Shopping, handles page interactions (clicking "Show More" buttons), extracts the HTML content, passes it to the parser, and saves the scraped product data to MongoDB.
  */
 
-import puppeteer from "puppeteer";
+import puppeteer from "puppeteer-extra";
+import StealthPlugin from "puppeteer-extra-plugin-stealth";
 import * as cheerio from "cheerio";
 import google from "./stores/google.js";
 import connectDB from "./config/database.js";
@@ -12,6 +13,10 @@ import { saveProduct } from "./services/productService.js";
 import dotenv from "dotenv";
 import { fileURLToPath } from "url";
 import path from "path";
+import randomUseragent from "random-useragent";
+
+// Initialize stealth plugin
+puppeteer.use(StealthPlugin());
 
 // Get directory name for the current module
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -22,13 +27,84 @@ dotenv.config({ path: configPath });
 
 // Default configuration values (used if not specified in config.env)
 export const config = {
-  MAX_CLICK_ATTEMPTS: process.env.MAX_CLICK_ATTEMPTS
-    ? parseInt(process.env.MAX_CLICK_ATTEMPTS, 10)
+  MAX_CLICK_ATTEMPTS_STORES: process.env.MAX_CLICK_ATTEMPTS_STORES
+    ? parseInt(process.env.MAX_CLICK_ATTEMPTS_STORES, 10)
     : 7,
+  MAX_CLICK_ATTEMPTS_REVIEWS: process.env.MAX_CLICK_ATTEMPTS_REVIEWS
+    ? parseInt(process.env.MAX_CLICK_ATTEMPTS_REVIEWS, 10)
+    : 5,
   DEFAULT_CLICK_DELAY: process.env.DEFAULT_CLICK_DELAY
     ? parseInt(process.env.DEFAULT_CLICK_DELAY, 10)
     : 1500,
 };
+
+/**
+ * Cross-version compatible wait function that works with different Puppeteer versions
+ * @param {Object} page - Puppeteer page object
+ * @param {number} ms - Time to wait in milliseconds
+ * @returns {Promise<void>}
+ */
+async function waitFor(page, ms) {
+  if (typeof page.waitForTimeout === 'function') {
+    // For newer Puppeteer versions
+    return page.waitForTimeout(ms);
+  } else if (typeof page.waitFor === 'function') {
+    // For older Puppeteer versions
+    return page.waitFor(ms);
+  } else {
+    // Fallback to plain setTimeout
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+}
+
+/**
+ * Creates random delays to mimic human behavior
+ * @param {number} min - Minimum delay in milliseconds
+ * @param {number} max - Maximum delay in milliseconds
+ * @returns {number} Random delay duration
+ */
+function getRandomDelay(min, max) {
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+/**
+ * Generates randomized human-like behavior for scrolling
+ * @param {Object} page - Puppeteer page object
+ */
+async function humanLikeScroll(page) {
+  const scrollHeight = await page.evaluate('document.body.scrollHeight');
+  const viewportHeight = await page.evaluate('window.innerHeight');
+  
+  // Number of scroll steps (variable based on page height)
+  const scrollSteps = Math.floor(scrollHeight / viewportHeight) + 1;
+  
+  for (let i = 0; i < scrollSteps; i++) {
+    // Calculate random scroll amount with occasional "jitter"
+    const scrollAmount = Math.floor(viewportHeight * (0.7 + Math.random() * 0.3));
+    
+    await page.evaluate((amount) => {
+      window.scrollBy({
+        top: amount,
+        behavior: 'smooth'
+      });
+    }, scrollAmount);
+    
+    // Random pause between scrolls
+    await waitFor(page, getRandomDelay(500, 1500));
+    
+    // Occasionally scroll back up slightly (like a human reading content)
+    if (Math.random() < 0.3) {
+      const backScrollAmount = Math.floor(Math.random() * 300);
+      await page.evaluate((amount) => {
+        window.scrollBy({
+          top: -amount,
+          behavior: 'smooth'
+        });
+      }, backScrollAmount);
+      await waitFor(page, getRandomDelay(400, 800));
+    }
+  }
+}
 
 /**
  * Scrapes a product from a Google Shopping URL
@@ -49,11 +125,6 @@ async function scrapeProduct(url, options = {}) {
   }
 
   // Set default options from environment config
-  const maxClicks =
-    options.maxClicks !== undefined
-      ? options.maxClicks
-      : config.MAX_CLICK_ATTEMPTS;
-
   const clickDelay =
     options.clickDelay !== undefined
       ? options.clickDelay
@@ -62,45 +133,145 @@ async function scrapeProduct(url, options = {}) {
   console.log(`🔍 Scraping URL: ${url}`);
   console.log(`📋 Options: ${JSON.stringify(options)}`);
   console.log(
-    `🔄 Will attempt up to ${maxClicks} clicks on "Show More" buttons`
+    `🔄 Will attempt up to ${config.MAX_CLICK_ATTEMPTS_STORES} clicks for stores and ${config.MAX_CLICK_ATTEMPTS_REVIEWS} clicks for reviews`
   );
   console.log(`⏱️ Click delay: ${clickDelay}ms`);
 
   // Connect to MongoDB
   await connectDB();
 
+  // Browser launch options with enhanced stealth
   const browser = await puppeteer.launch({ 
     headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox'] // Helps with some environments
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-infobars',
+      '--window-position=0,0',
+      '--ignore-certifcate-errors',
+      '--ignore-certifcate-errors-spki-list',
+      `--user-agent=${randomUseragent.getRandom()}`,
+      '--disable-web-security'
+    ]
   });
+  
   const page = await browser.newPage();
+  
+  // Randomize viewport size
+  const width = Math.floor(Math.random() * (1920 - 1024 + 1)) + 1024;
+  const height = Math.floor(Math.random() * (1080 - 768 + 1)) + 768;
+  await page.setViewport({ width, height, deviceScaleFactor: 1 });
 
+  // Randomize request headers
   await page.setExtraHTTPHeaders({
-    "User-Agent":
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-    "Accept-Language": "en-US,en;q=0.9",
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
+    'Accept-Language': 'en-US,en;q=0.9,ar;q=0.8',
+    'Cache-Control': 'max-age=0',
+    'Connection': 'keep-alive',
+    'Referer': 'https://www.google.com/',
+    'Sec-Ch-Ua': '"Not.A/Brand";v="8", "Chromium";v="114", "Google Chrome";v="114"',
+    'Sec-Ch-Ua-Mobile': '?0',
+    'Sec-Ch-Ua-Platform': '"Windows"',
+    'Sec-Fetch-Dest': 'document',
+    'Sec-Fetch-Mode': 'navigate',
+    'Sec-Fetch-Site': 'same-origin',
+    'Upgrade-Insecure-Requests': '1',
+  });
+
+  // Modify browser fingerprint to appear more human-like
+  await page.evaluateOnNewDocument(() => {
+    // Override the 'webdriver' property
+    Object.defineProperty(navigator, 'webdriver', {
+      get: () => false,
+    });
+    
+    // Override Chrome's automation property
+    window.chrome = {
+      runtime: {},
+      loadTimes: function() {},
+      csi: function() {},
+      app: {},
+    };
+    
+    // Override permissions API
+    const originalQuery = window.navigator.permissions.query;
+    window.navigator.permissions.query = (parameters) => (
+      parameters.name === 'notifications' ?
+        Promise.resolve({ state: Notification.permission }) :
+        originalQuery(parameters)
+    );
+    
+    // Add plugins
+    Object.defineProperty(navigator, 'plugins', {
+      get: () => {
+        const plugins = [
+          {
+            0: {
+              type: 'application/x-google-chrome-pdf',
+              suffixes: 'pdf',
+              description: 'Portable Document Format'
+            },
+            name: 'Chrome PDF Plugin',
+            filename: 'internal-pdf-viewer',
+            description: 'Portable Document Format'
+          },
+          {
+            0: {
+              type: 'application/pdf',
+              suffixes: 'pdf',
+              description: 'Portable Document Format'
+            },
+            name: 'Chrome PDF Viewer',
+            filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai',
+            description: 'Portable Document Format'
+          }
+        ];
+        return plugins;
+      }
+    });
+    
+    // Add language preferences
+    Object.defineProperty(navigator, 'languages', {
+      get: () => ['en-US', 'en', 'ar'],
+    });
   });
 
   console.log(`🌐 Sending request to Google Shopping`);
 
   try {
-    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
+    // Add random delay before navigation
+    await waitFor(page, getRandomDelay(1000, 3000));
+    
+    // Navigate with a more realistic timeout
+    await page.goto(url, { 
+      waitUntil: "networkidle2", 
+      timeout: 30000 
+    });
+
+    // Wait randomly to appear more human-like
+    await waitFor(page, getRandomDelay(2000, 4000));
 
     // Explicit wait for main container to load
     await page.waitForSelector(".bWXikd", { timeout: 15000 });
 
     console.log(`✅ Response received`);
 
-    // Function to delay execution
-    const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+    // Function to delay execution with randomization
+    const delay = ms => new Promise(resolve => setTimeout(resolve, ms + getRandomDelay(-200, 400)));
+
+    // Perform human-like scrolling to appear natural
+    await humanLikeScroll(page);
 
     // Step 1: Load more stores by clicking "Show More" button multiple times
     await expandSection(page, {
-      buttonSelector: ".jgbNbb.YbJ8Df", 
+      buttonSelector: ".jgbNbb.YbJ8Df",
       sectionName: "stores",
-      maxClicks,
-      delay: clickDelay
+      maxClicks: config.MAX_CLICK_ATTEMPTS_STORES,
+      delay: clickDelay,
     });
+
+    // Add random delay between sections
+    await waitFor(page, getRandomDelay(1500, 3000));
 
     // Step 2: Check for review section and try to expand it
     console.log(`🔍 Searching for review section...`);
@@ -116,7 +287,6 @@ async function scrapeProduct(url, options = {}) {
       for (const selector of reviewSelectors) {
         const elements = document.querySelectorAll(selector);
         if (elements.length > 0) {
-          console.log(`Found review section with selector: ${selector}`);
           elements[0].scrollIntoView({ behavior: "smooth", block: "center" });
           return true;
         }
@@ -126,7 +296,8 @@ async function scrapeProduct(url, options = {}) {
       const reviewTexts = ["المراجعات", "reviews", "التقييمات"];
       for (const text of reviewTexts) {
         const elements = Array.from(document.querySelectorAll('*'))
-          .filter(el => el.textContent.includes(text));
+          .filter(el => el.textContent.includes(text) &&
+                       window.getComputedStyle(el).display !== "none");
         
         if (elements.length > 0) {
           elements[0].scrollIntoView({ behavior: "smooth", block: "center" });
@@ -139,13 +310,14 @@ async function scrapeProduct(url, options = {}) {
 
     if (reviewSectionExists) {
       console.log(`✅ Review section found`);
-      await delay(1000); // Wait for scroll to complete
+      // Adding variable delay to mimic human reading behavior
+      await delay(getRandomDelay(800, 2000));
 
       await expandSection(page, {
-        buttonSelector: ".jgbNbb.MpEZrd.YbJ8Df.g5UPGe", 
+        buttonSelector: ".jgbNbb.MpEZrd.YbJ8Df.g5UPGe",
         sectionName: "reviews",
-        maxClicks,
-        delay: clickDelay
+        maxClicks: config.MAX_CLICK_ATTEMPTS_REVIEWS,
+        delay: clickDelay,
       });
     } else {
       console.log(`ℹ️ No review section found`);
@@ -195,6 +367,8 @@ async function scrapeProduct(url, options = {}) {
     console.error(`❌ Error scraping:`, error.message || error);
     throw error;
   } finally {
+    // Clean up and close browser with random delay to avoid patterns
+    await waitFor(page, getRandomDelay(1000, 3000));
     await browser.close();
   }
 }
@@ -230,14 +404,14 @@ async function expandSection(
   let attempts = 0;
 
   // Function for delaying execution (replacement for page.waitForTimeout)
-  const waitForTimeout = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+  const waitForTimeout = (ms) => waitFor(page, ms);
 
   while (clickCount < maxClicks && attempts < maxAttempts) {
     attempts++;
 
     try {
       // Wait a bit before each click attempt
-      await waitForTimeout(300);
+      await waitFor(page, 300);
 
       // First approach: Direct CSS selector
       console.log(

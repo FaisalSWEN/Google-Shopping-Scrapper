@@ -3,9 +3,9 @@
   "version": "1.0.0",
   "description": "Google Shopping Price Tracker",
   "type": "module",
-  "main": "scraper.js",
+  "main": "scrapper.js",
   "scripts": {
-    "start": "node scraper.js",
+    "start": "node scrapper.js",
     "list": "node scripts/listProducts.js",
     "test-db": "node scripts/testConnection.js"
   },
@@ -26,7 +26,7 @@
     "mongoose": "^8.14.1",
     "puppeteer": "^24.7.2",
     "puppeteer-extra": "^3.3.6",
-    "puppeteer-extra-plugin-anonymize-ua": "^2.4.6",
-    "puppeteer-extra-plugin-stealth": "^2.11.2"
+    "puppeteer-extra-plugin-stealth": "^2.11.2",
+    "random-useragent": "^0.5.0"
   }
 }

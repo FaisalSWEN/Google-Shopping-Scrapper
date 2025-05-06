@@ -1,5 +1,5 @@
 node_modules/
-captcha_screenshots/
+screenshots/
 *.env
 *.log
 .DS_Store

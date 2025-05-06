@@ -4,17 +4,19 @@
  * Uses Puppeteer to navigate to Google Shopping, handles page interactions (clicking "Show More" buttons), extracts the HTML content, passes it to the parser, and saves the scraped product data to MongoDB.
  */
 
+import path from "path";
+import fs from 'fs';
+import { fileURLToPath } from "url";
 import puppeteer from "puppeteer-extra";
 import StealthPlugin from "puppeteer-extra-plugin-stealth";
 import * as cheerio from "cheerio";
+import dotenv from "dotenv";
+import randomUseragent from "random-useragent";
 import google from "./stores/google.js";
 import connectDB from "./config/database.js";
 import { saveProduct } from "./services/productService.js";
-import dotenv from "dotenv";
-import { fileURLToPath } from "url";
-import path from "path";
-import randomUseragent from "random-useragent";
 import { googleSelectors } from "./config/selectors.js";
+import util from 'util';
 
 // Initialize stealth plugin
 puppeteer.use(StealthPlugin());
@@ -38,6 +40,152 @@ export const config = {
     ? parseInt(process.env.DEFAULT_CLICK_DELAY, 10)
     : 1500,
 };
+
+// Add screenshot functionality for error handling
+// Create screenshots directory if it doesn't exist
+const screenshotsDir = path.join(__dirname, 'screenshots');
+if (!fs.existsSync(screenshotsDir)) {
+  fs.mkdirSync(screenshotsDir, { recursive: true });
+}
+
+// Enhanced logging utilities
+/**
+ * Enhanced error logging function that provides more context and details
+ * @param {Error} error - The error object to log
+ * @param {Object} options - Options for customizing the log output
+ * @param {string} options.context - The context in which the error occurred
+ * @param {Object} options.additionalData - Any additional data to include in the log
+ * @param {boolean} options.showStack - Whether to show the full stack trace (default: true)
+ */
+function logError(error, options = {}) {
+  const {
+    context = 'General',
+    additionalData = {},
+    showStack = true
+  } = options;
+  
+  console.error('\n❌ ERROR DETAILS ' + '='.repeat(50));
+  console.error(`🔍 Context: ${context}`);
+  console.error(`⚠️ Type: ${error.name || 'Unknown Error Type'}`);
+  console.error(`📝 Message: ${error.message}`);
+  
+  // If there's additional data, display it
+  if (Object.keys(additionalData).length > 0) {
+    console.error('📋 Additional Information:');
+    Object.entries(additionalData).forEach(([key, value]) => {
+      if (typeof value === 'object' && value !== null) {
+        console.error(`   ${key}: ${util.inspect(value, { depth: 1, colors: true })}`);
+      } else {
+        console.error(`   ${key}: ${value}`);
+      }
+    });
+  }
+  
+  // Display selector information for timeout errors
+  if (error.name === 'TimeoutError') {
+    const selectorMatch = error.message.match(/Waiting for selector `([^`]+)`/);
+    if (selectorMatch) {
+      const selector = selectorMatch[1];
+      console.error(`🔍 Failed Selector: ${selector}`);
+      console.error(`💡 Possible causes:`);
+      console.error(`   - Page structure may have changed (Google updated their HTML)`);
+      console.error(`   - Element may be inside an iframe or dynamically loaded`);
+      console.error(`   - The selector might not be present on this particular product page`);
+      console.error(`   - Page might be showing a CAPTCHA or anti-bot challenge`);
+    }
+  }
+  
+  // Only show stack trace if requested
+  if (showStack && error.stack) {
+    console.error('📚 Stack Trace:');
+    const formattedStack = error.stack
+      .split('\n')
+      .map(line => '   ' + line.trim())
+      .join('\n');
+    console.error(formattedStack);
+  }
+  
+  console.error('='.repeat(65) + '\n');
+}
+
+// Enhance screenshot functionality to handle different error types
+async function takeErrorScreenshot(page, errorType, details = '', additionalData = {}) {
+  try {
+    // Format current time for filename
+    const now = new Date();
+    const timestamp = now.toISOString()
+      .replace(/:/g, '-')
+      .replace(/\..+/, '');
+    
+    const sanitizedDetails = details.replace(/[^a-z0-9]/gi, '_').substring(0, 50);
+    const filename = `${errorType}_${sanitizedDetails}_${timestamp}.png`;
+    const screenshotPath = path.join(screenshotsDir, filename);
+    
+    await page.screenshot({ 
+      path: screenshotPath,
+      fullPage: true 
+    });
+    
+    // Add debug information to the page before taking the screenshot for selector errors
+    if (errorType === 'selector_error' && additionalData.selector) {
+      await page.evaluate((selector) => {
+        // Try to find the closest matching element for debugging
+        try {
+          // Create a div to show debug information
+          const debugDiv = document.createElement('div');
+          debugDiv.style.position = 'fixed';
+          debugDiv.style.top = '10px';
+          debugDiv.style.left = '10px';
+          debugDiv.style.padding = '10px';
+          debugDiv.style.background = 'rgba(255, 0, 0, 0.7)';
+          debugDiv.style.color = 'white';
+          debugDiv.style.zIndex = '9999';
+          debugDiv.style.maxWidth = '80%';
+          debugDiv.innerHTML = `<h3>Debug Info</h3><p>Failed to find: ${selector}</p>`;
+          
+          // Try to find similar selectors
+          const similarElements = document.querySelectorAll('*[class*="' + 
+            selector.replace(/^\./, '').split(' ')[0] + '"]');
+          
+          if (similarElements.length > 0) {
+            debugDiv.innerHTML += `<p>Found ${similarElements.length} similar elements</p>`;
+            
+            // List the first 5 similar elements
+            const list = document.createElement('ul');
+            Array.from(similarElements).slice(0, 5).forEach(el => {
+              const item = document.createElement('li');
+              item.textContent = el.className;
+              list.appendChild(item);
+            });
+            debugDiv.appendChild(list);
+          }
+          
+          document.body.appendChild(debugDiv);
+        } catch (e) {
+          // Ignore any errors in the debug code
+        }
+      }, additionalData.selector);
+      
+      // Take another screenshot with the debug information
+      const debugFilename = `${errorType}_DEBUG_${sanitizedDetails}_${timestamp}.png`;
+      const debugScreenshotPath = path.join(screenshotsDir, debugFilename);
+      await page.screenshot({ 
+        path: debugScreenshotPath,
+        fullPage: true 
+      });
+      
+      console.log(`📸 Error screenshot saved to: ${screenshotPath}`);
+      console.log(`🔍 Debug screenshot saved to: ${debugScreenshotPath}`);
+      return { regular: screenshotPath, debug: debugScreenshotPath };
+    }
+    
+    console.log(`📸 Error screenshot saved to: ${screenshotPath}`);
+    return { regular: screenshotPath };
+  } catch (screenshotError) {
+    console.error('⚠️ Failed to take error screenshot:', screenshotError.message);
+    return null;
+  }
+}
 
 /**
  * Cross-version compatible wait function that works with different Puppeteer versions
@@ -113,7 +261,9 @@ async function humanLikeScroll(page) {
  * @param {Object} options - Optional parameters
  * @param {string} options.category - Product category (e.g., 'phones', 'laptops')
  * @param {string} options.brand - Product brand (e.g., 'Apple', 'Samsung')
- * @param {number} options.maxClicks - Maximum number of clicks for "Show More" buttons (default: from config)
+ * @param {number} options.maxClicksStores - Maximum number of clicks for showing more stores button (default: from config)
+ * @param {number} options.maxClicksReviews - Maximum number of clicks for showing more reviews button (default: from config)
+ * @param {number} options.clickDelay - Delay between clicks in milliseconds (default: from config)
  * @returns {Promise<Object>} The saved product data
  * @throws {Error} If URL is not provided
  */
@@ -126,6 +276,14 @@ async function scrapeProduct(url, options = {}) {
   }
 
   // Set default options from environment config
+  const maxClicksStores = options.maxClicksStores !== undefined 
+    ? options.maxClicksStores 
+    : config.MAX_CLICK_ATTEMPTS_STORES;
+  
+  const maxClicksReviews = options.maxClicksReviews !== undefined 
+    ? options.maxClicksReviews 
+    : config.MAX_CLICK_ATTEMPTS_REVIEWS;
+    
   const clickDelay =
     options.clickDelay !== undefined
       ? options.clickDelay
@@ -134,7 +292,7 @@ async function scrapeProduct(url, options = {}) {
   console.log(`🔍 Scraping URL: ${url}`);
   console.log(`📋 Options: ${JSON.stringify(options)}`);
   console.log(
-    `🔄 Will attempt up to ${config.MAX_CLICK_ATTEMPTS_STORES} clicks for stores and ${config.MAX_CLICK_ATTEMPTS_REVIEWS} clicks for reviews`
+    `🔄 Will attempt up to ${maxClicksStores} clicks for stores and ${maxClicksReviews} clicks for reviews`
   );
   console.log(`⏱️ Click delay: ${clickDelay}ms`);
 
@@ -360,7 +518,39 @@ async function scrapeProduct(url, options = {}) {
 
     return savedProduct;
   } catch (error) {
-    console.error(`❌ Error scraping:`, error.message || error);
+    // Use our enhanced error logging with more context
+    logError(error, {
+      context: 'Product Scraping',
+      additionalData: {
+        url: url,
+        options: options,
+        selectors: {
+          mainContainer: googleSelectors.mainContainer
+        },
+        pageInfo: {
+          url: page.url(),
+          title: await page.title().catch(() => 'Unknown')
+        }
+      }
+    });
+    
+    // Take a more detailed screenshot with context
+    if (error.name === 'TimeoutError') {
+      // For selector errors, include which selector failed
+      const selectorMatch = error.message.match(/Waiting for selector `([^`]+)`/);
+      if (selectorMatch) {
+        await takeErrorScreenshot(page, 'selector_error', error.message, {
+          selector: selectorMatch[1]
+        });
+      } else {
+        await takeErrorScreenshot(page, 'timeout_error', error.message);
+      }
+    } else if (error.name === 'NavigationError' || error.message.includes('navigation')) {
+      await takeErrorScreenshot(page, 'navigation_error', error.message);
+    } else {
+      await takeErrorScreenshot(page, 'scraper_error', error.message);
+    }
+    
     throw error;
   } finally {
     // Clean up and close browser with random delay to avoid patterns
@@ -681,23 +871,32 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const url = process.argv[2];
   const category = process.argv[3];
   const brand = process.argv[4];
-  const maxClicks = process.argv[5] ? parseInt(process.argv[5], 10) : config.MAX_CLICK_ATTEMPTS;
+  
+  // Use the correct config variables for command line arguments
+  const storesClicks = process.argv[5] ? parseInt(process.argv[5], 10) : config.MAX_CLICK_ATTEMPTS_STORES;
+  const reviewsClicks = process.argv[6] ? parseInt(process.argv[6], 10) : config.MAX_CLICK_ATTEMPTS_REVIEWS;
 
   if (!url) {
     console.error("❌ Error: URL is required");
-    console.log("Usage: node test.js <url> [category] [brand] [maxClicks]");
+    console.log("Usage: node scrapper.js <url> [category] [brand] [storesClicks] [reviewsClicks]");
     process.exit(1);
   }
 
   // Run the scraper with arguments
-  scrapeProduct(url, { category, brand, maxClicks })
+  scrapeProduct(url, { 
+    category, 
+    brand, 
+    maxClicksStores: storesClicks,
+    maxClicksReviews: reviewsClicks
+  })
     .then(() => {
       console.log("✅ Scraping completed successfully");
       // Exit after direct execution
       setTimeout(() => process.exit(0), 2000);
     })
     .catch((error) => {
-      console.error("❌ Scraping failed:", error);
+      // Avoid duplicating the error message since we've already logged it with our enhanced logger
+      console.error("❌ Scraping failed");
       process.exit(1);
     });
 } else {

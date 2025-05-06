@@ -1,3 +1,10 @@
+/**
+ * Test script to verify MongoDB connection.
+ * 
+ * This script connects to the MongoDB database and displays connection details
+ * and available collections.
+ */
+
 import connectDB from "../config/database.js";
 import mongoose from "mongoose";
 import dotenv from "dotenv";
@@ -6,10 +13,9 @@ import path from "path";
 
 // Get directory name for the current module
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const rootDir = path.resolve(__dirname, "..");
 
-// Use only config.env
-const configPath = path.join(rootDir, "config.env");
+// Updated path to config.env in config directory
+const configPath = path.join(__dirname, "..", "config", "config.env");
 dotenv.config({ path: configPath });
 
 async function testConnection() {

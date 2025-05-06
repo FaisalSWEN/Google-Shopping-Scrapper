@@ -14,6 +14,7 @@ import {
   getHighestPrice,
   getAveragePrice,
 } from "../utils/utils.js";
+import { googleSelectors } from "../config/selectors.js";
 
 /**
  * Scrapes product data from Google Shopping
@@ -26,15 +27,15 @@ import {
  */
 function scrapeGoogleShopping($, url, options = {}) {
   // Get all store containers
-  const storeContainers = $(".R5K7Cb.SPI3ee");
+  const storeContainers = $(googleSelectors.stores.container);
 
   const productName =
-    storeContainers.first().find(".Rp8BL").text().trim() || null;
+    storeContainers.first().find(googleSelectors.stores.productTitle).text().trim() || null;
   const stores = [];
 
   // Extract product images (limited to 4)
   const photoLinks = [];
-  $(".ThT8pe img, .KfAt4d").each((i, el) => {
+  $(googleSelectors.product.images).each((i, el) => {
     if (photoLinks.length < 4) {
       const imgSrc = $(el).attr("src");
       if (imgSrc && !photoLinks.includes(imgSrc)) {
@@ -43,9 +44,9 @@ function scrapeGoogleShopping($, url, options = {}) {
     }
   });
 
-  // Extract product type information from PQev6c class
+  // Extract product type information
   let productType = null;
-  $(".PQev6c").each((i, el) => {
+  $(googleSelectors.product.type).each((i, el) => {
     const typeText = $(el).text().trim();
     if (typeText) {
       productType = typeText;
@@ -61,20 +62,12 @@ function scrapeGoogleShopping($, url, options = {}) {
     const storeData = {};
 
     // Store name extraction
-    storeData.store = container.find(".hP4iBf.gUf0b").text().trim() || null;
+    storeData.store = container.find(googleSelectors.stores.name).text().trim() || null;
 
     // Current price extraction - try multiple selectors
     let priceText = null;
 
-    const priceSelectors = [
-      ".Pgbknd span",
-      ".GBgquf.JIep9e span",
-      ".GBgquf span",
-      ".Xs9evb .Pgbknd span",
-      ".HDOUoe span",
-    ];
-
-    for (const selector of priceSelectors) {
+    for (const selector of googleSelectors.stores.currentPrice) {
       const priceEl = container.find(selector).first();
       if (priceEl.length > 0) {
         priceText = priceEl.text().trim();
@@ -86,14 +79,8 @@ function scrapeGoogleShopping($, url, options = {}) {
 
     // Original price extraction - look for multiple possible classes
     let oldPriceText = null;
-    const oldPriceSelectors = [
-      ".AoPnCe.JPwIxc span",
-      ".AoPnCe span",
-      ".UPworb .AoPnCe span",
-      ".AoPnCe.JPwIxc span span",
-    ];
-
-    for (const selector of oldPriceSelectors) {
+    
+    for (const selector of googleSelectors.stores.originalPrice) {
       const oldPriceEl = container.find(selector).first();
       if (oldPriceEl.length > 0) {
         oldPriceText = oldPriceEl.text().trim();
@@ -105,25 +92,24 @@ function scrapeGoogleShopping($, url, options = {}) {
       extractNumbers(oldPriceText) || storeData.current_price;
 
     // Rating extraction with proper number formatting
-    const ratingSelector = ".NFq8Ad.cHaqb";
-    const ratingText = container.find(ratingSelector).first().text().trim();
+    const ratingText = container.find(googleSelectors.stores.rating).first().text().trim();
     storeData.rating = formatRating(ratingText);
 
     // Free delivery check
-    const deliveryText = container.find(".gASiG").text().toLowerCase();
+    const deliveryText = container.find(googleSelectors.stores.delivery).text().toLowerCase();
     storeData.free_delivery =
       deliveryText.includes("مجاني") ||
       deliveryText.includes("free") ||
       deliveryText.includes("مجانا");
 
     // Product details
-    storeData.product_title = container.find(".Rp8BL").text().trim() || null;
-    storeData.product_url = container.find("a.P9159d").attr("href") || null;
+    storeData.product_title = container.find(googleSelectors.stores.productTitle).text().trim() || null;
+    storeData.product_url = container.find(googleSelectors.stores.productUrl).attr("href") || null;
 
     stores.push(storeData);
   });
 
-  // Scrape reviews (up to 10)
+  // Scrape reviews (without limit)
   const reviews = scrapeReviews($);
 
   // Scrape rating distribution

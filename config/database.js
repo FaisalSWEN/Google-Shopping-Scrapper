@@ -11,10 +11,9 @@ import path from "path";
 
 // Get directory name for the current module
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const rootDir = path.resolve(__dirname, "..");
 
-// Configure dotenv to use only config.env
-const configPath = path.join(rootDir, "config.env");
+// Path to config.env file in the same config directory
+const configPath = path.join(__dirname, "config.env");
 dotenv.config({ path: configPath });
 
 // Default configuration values (used if not specified in config.env)

@@ -14,6 +14,7 @@ import dotenv from "dotenv";
 import { fileURLToPath } from "url";
 import path from "path";
 import randomUseragent from "random-useragent";
+import { googleSelectors } from "./config/selectors.js";
 
 // Initialize stealth plugin
 puppeteer.use(StealthPlugin());
@@ -21,8 +22,8 @@ puppeteer.use(StealthPlugin());
 // Get directory name for the current module
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// Use only config.env
-const configPath = path.join(__dirname, "config.env");
+// Updated path to config.env now in config directory
+const configPath = path.join(__dirname, "config", "config.env");
 dotenv.config({ path: configPath });
 
 // Default configuration values (used if not specified in config.env)
@@ -252,7 +253,7 @@ async function scrapeProduct(url, options = {}) {
     await waitFor(page, getRandomDelay(2000, 4000));
 
     // Explicit wait for main container to load
-    await page.waitForSelector(".bWXikd", { timeout: 15000 });
+    await page.waitForSelector(googleSelectors.mainContainer, { timeout: 15000 });
 
     console.log(`✅ Response received`);
 
@@ -264,7 +265,7 @@ async function scrapeProduct(url, options = {}) {
 
     // Step 1: Load more stores by clicking "Show More" button multiple times
     await expandSection(page, {
-      buttonSelector: ".jgbNbb.YbJ8Df",
+      buttonSelector: googleSelectors.buttons.stores,
       sectionName: "stores",
       maxClicks: config.MAX_CLICK_ATTEMPTS_STORES,
       delay: clickDelay,
@@ -275,16 +276,9 @@ async function scrapeProduct(url, options = {}) {
 
     // Step 2: Check for review section and try to expand it
     console.log(`🔍 Searching for review section...`);
-    const reviewSectionExists = await page.evaluate(() => {
+    const reviewSectionExists = await page.evaluate((selectors) => {
       // Try multiple selectors for review section
-      const reviewSelectors = [
-        ".wKtRYe.PZPZlf",
-        ".afKV8.OgnHP",  // Another possible container
-        "[data-review-id]", // Elements with review IDs
-        ".QcJav" // Review section container
-      ];
-      
-      for (const selector of reviewSelectors) {
+      for (const selector of selectors.reviewSection) {
         const elements = document.querySelectorAll(selector);
         if (elements.length > 0) {
           elements[0].scrollIntoView({ behavior: "smooth", block: "center" });
@@ -293,8 +287,7 @@ async function scrapeProduct(url, options = {}) {
       }
       
       // Also try finding by text content related to reviews
-      const reviewTexts = ["المراجعات", "reviews", "التقييمات"];
-      for (const text of reviewTexts) {
+      for (const text of selectors.reviewSectionTexts) {
         const elements = Array.from(document.querySelectorAll('*'))
           .filter(el => el.textContent.includes(text) &&
                        window.getComputedStyle(el).display !== "none");
@@ -306,6 +299,9 @@ async function scrapeProduct(url, options = {}) {
       }
       
       return false;
+    }, { 
+      reviewSection: googleSelectors.reviewSection, 
+      reviewSectionTexts: googleSelectors.reviewSectionTexts 
     });
 
     if (reviewSectionExists) {
@@ -314,7 +310,7 @@ async function scrapeProduct(url, options = {}) {
       await delay(getRandomDelay(800, 2000));
 
       await expandSection(page, {
-        buttonSelector: ".jgbNbb.MpEZrd.YbJ8Df.g5UPGe",
+        buttonSelector: googleSelectors.buttons.reviews,
         sectionName: "reviews",
         maxClicks: config.MAX_CLICK_ATTEMPTS_REVIEWS,
         delay: clickDelay,

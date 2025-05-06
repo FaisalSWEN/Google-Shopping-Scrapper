@@ -1,3 +1,9 @@
+/**
+ * Utility script to list all products in the database.
+ * 
+ * Displays product details like name, price range, and statistics.
+ */
+
 import connectDB from "../config/database.js";
 import { getAllProducts } from "../services/productService.js";
 import dotenv from "dotenv";
@@ -8,8 +14,8 @@ import path from "path";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, "..");
 
-// Use only config.env
-const configPath = path.join(rootDir, "config.env");
+// Updated path to config.env in config directory
+const configPath = path.join(__dirname, "..", "config", "config.env");
 dotenv.config({ path: configPath });
 
 async function displayProducts() {
